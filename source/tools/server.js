@@ -3,7 +3,15 @@ const fs = require("fs");
 const path = require("path");
 
 const PORT = process.env.PORT || 3000;
-const { WEB, COLLECTIONS_DIR, CONTACT_RTF, CONTACT_TXT } = require("./paths");
+const { buildCatalog } = require("./catalog");
+const { WEB, COLLECTIONS_DIR, CONTACT_RTF, CONTACT_TXT, RECENT_DIR, BOOKS_DIR, INFO_DIR } = require("./paths");
+
+const CONTENT_ROOTS = {
+  "recent-pictures": RECENT_DIR,
+  "books-and-printed-work": BOOKS_DIR,
+  info: INFO_DIR,
+};
+const CONTENT_EXT = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".txt"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -21,7 +29,8 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer((req, res) => {
-  let urlPath = req.url === "/" ? "/index.html" : req.url.split("?")[0];
+  let urlPath = (req.url || "/").split("?")[0];
+  if (urlPath === "/" || urlPath === "") urlPath = "/index.html";
   try {
     urlPath = decodeURIComponent(urlPath);
   } catch (e) {
@@ -34,11 +43,21 @@ const server = http.createServer((req, res) => {
     res.end("404 Not Found");
     return;
   }
+  if (safePath === "catalog.json") {
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    res.end(JSON.stringify(buildCatalog()));
+    return;
+  }
   let filePath;
   if (safePath === "contact.rtf") filePath = CONTACT_RTF;
   else if (safePath === "contact.txt") filePath = CONTACT_TXT;
   else if (parts[0] === "collections") filePath = path.join(COLLECTIONS_DIR, ...parts.slice(1));
-  else filePath = path.join(WEB, ...parts);
+  else if (CONTENT_ROOTS[parts[0]] && CONTENT_EXT.has(path.extname(safePath).toLowerCase())) {
+    filePath = path.join(CONTENT_ROOTS[parts[0]], ...parts.slice(1));
+  } else filePath = path.join(WEB, ...parts);
 
   fs.readFile(filePath, (err, data) => {
     if (err) {
@@ -53,6 +72,8 @@ const server = http.createServer((req, res) => {
     const headers = { "Content-Type": contentType };
     if (ext === ".jpg" || ext === ".jpeg" || ext === ".png" || ext === ".webp" || ext === ".gif") {
       headers["Cache-Control"] = "public, max-age=86400";
+    } else if (ext === ".html" || ext === ".css" || ext === ".js") {
+      headers["Cache-Control"] = "no-cache";
     }
     res.writeHead(200, headers);
     res.end(data);

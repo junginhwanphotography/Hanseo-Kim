@@ -10,6 +10,13 @@ describe("HTTP 서버 기본 동작", () => {
     expect(response.text).toContain("Hanseo Kim");
   });
 
+  it("쿼리가 붙은 첫 페이지도 HTML을 반환한다", async () => {
+    const response = await request(server).get("/?v=1");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain("Recent Pictures");
+  });
+
   it("컬렉션 JSON을 web에서 제공한다", async () => {
     const response = await request(server).get("/collections.json");
 
@@ -27,6 +34,30 @@ describe("HTTP 서버 기본 동작", () => {
     expect(response.headers["content-type"]).toContain("application/json");
     expect(Array.isArray(response.body.images)).toBe(true);
     expect(response.body.images.length).toBeGreaterThan(0);
+  });
+
+  it("세 메뉴 목록과 사진 파일을 따로 제공한다", async () => {
+    const response = await request(server).get("/catalog.json");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toContain("application/json");
+    expect(response.body.recent.map((item) => item.title)).toEqual([
+      "영월",
+      "바닥을 기어다니며",
+      "paris to rome",
+      "Mt.Fuji to Tokyo with BAHNO 1",
+      "shizuoka",
+      "okinawa",
+      "통신보안",
+    ]);
+    expect(response.body.recent[0].images[0]).toMatch(/^recent-pictures\//);
+    expect(response.body.recent.some((item) => item.id === "_WALL")).toBe(false);
+    expect(Array.isArray(response.body.books)).toBe(true);
+    expect(response.body.info).toContain("kimhanseo123@naver.com");
+
+    const image = await request(server).get("/" + response.body.recent[0].images[0]);
+    expect(image.status).toBe(200);
+    expect(image.headers["content-type"]).toContain("image/jpeg");
   });
 
   it("존재하지 않는 경로에 404를 반환한다", async () => {
