@@ -9,15 +9,10 @@
     <link rel="apple-touch-icon" href="favicon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,300&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="hanseo.css?v=20" />
-    <link rel="stylesheet" href="sections/site.css?v=7" />
-    <link rel="stylesheet" href="sections/recent.css?v=8" />
-    <link rel="stylesheet" href="sections/books.css?v=2" />
-    <link rel="stylesheet" href="sections/info.css?v=2" />
-    <link rel="stylesheet" href="sections/gallery.css?v=7" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="hanseo.css?v=15" />
     <script>
-      if (location.hash && location.hash !== "#" && location.hash !== "#intro") {
+      if (location.hash === "#photographs" || location.hash === "#contact" || /^#photo\/\d+$/.test(location.hash)) {
         document.documentElement.classList.add("enter-now");
       }
     </script>
@@ -57,29 +52,66 @@
       </div>
       <div class="intro-copy">
         <h1 class="intro-name">Hanseo Kim</h1>
-        <a class="enter" id="enter" href="#recent">click here to enter</a>
+        <a class="enter" id="enter" href="#photographs">click here to enter</a>
       </div>
     </header>
 
-    <div class="site" id="site">
-      <header class="site-nav">
-        <nav aria-label="Site">
-          <ul>
-            <li><a href="#intro" data-nav="intro">Hanseo Kim</a></li>
-            <li><a href="#recent" data-nav="recent">Recent Pictures</a></li>
-            <li><a href="#books" data-nav="books">Books and Printed Work</a></li>
-            <li><a href="#info" data-nav="info">Info</a></li>
-          </ul>
-        </nav>
-      </header>
-      <div class="site-view" id="site-view"></div>
+    <div class="grid-scroll" id="grid-scroll">
+      <nav class="rail" aria-label="Site">
+        <a class="rail-name" id="home-link" href="./">Hanseo<br />Kim</a>
+        <ul class="rail-nav">
+          <li><a href="#photographs" id="nav-photos">Photographs</a></li>
+          <li><a href="#contact" id="nav-contact">Contact</a></li>
+        </ul>
+      </nav>
+      <div class="grid" id="grid"></div>
     </div>
+
+    <main class="stage" id="stage" aria-label="Photograph" aria-hidden="true">
+      <p class="gallery-empty" id="gallery-empty" hidden>Photographs could not be loaded.</p>
+      <p class="visually-hidden" id="photo-status" aria-live="polite"></p>
+      <button type="button" class="stage-zone stage-zone-prev" id="zone-prev" aria-label="Previous photograph"></button>
+      <button type="button" class="stage-zone stage-zone-close" id="zone-close" aria-label="Close photograph"></button>
+      <button type="button" class="stage-zone stage-zone-next" id="zone-next" aria-label="Next photograph"></button>
+    </main>
+
+    <section class="contact" id="contact" hidden></section>
 
     <script>
       const intro = document.getElementById("intro");
+      const enterLink = document.getElementById("enter");
+      const homeLink = document.getElementById("home-link");
+      const photosLink = document.getElementById("nav-photos");
+      const contactLink = document.getElementById("nav-contact");
+      const contact = document.getElementById("contact");
+      const gridScroll = document.getElementById("grid-scroll");
+      const grid = document.getElementById("grid");
+      const stage = document.getElementById("stage");
+      const zonePrev = document.getElementById("zone-prev");
+      const zoneClose = document.getElementById("zone-close");
+      const zoneNext = document.getElementById("zone-next");
+      const statusEl = document.getElementById("photo-status");
+      const emptyEl = document.getElementById("gallery-empty");
       const board = document.getElementById("intro-board");
       const paintUndo = document.getElementById("paint-undo");
       const paintClear = document.getElementById("paint-clear");
+
+      const photoHash = location.hash.match(/^#photo\/(\d+)$/);
+      let photos = [];
+      let slides = [];
+      let gridItems = [];
+      let index = photoHash ? Number(photoHash[1]) : 0;
+      let showToken = 0;
+      let view = photoHash
+        ? "viewer"
+        : location.hash === "#contact"
+          ? "contact"
+          : location.hash === "#photographs"
+            ? "photos"
+            : "intro";
+      let opening = false;
+      let busy = false;
+
       const boardCtx = board.getContext("2d");
       const paintStrokes = [];
       const paintTools = {
@@ -234,13 +266,764 @@
 
       board.addEventListener("pointerup", endPaint);
       board.addEventListener("pointercancel", endPaint);
+
+      function isHiddenCollection(id) {
+        return String(id || "").replace(/^_/, "").toUpperCase() === "WALL";
+      }
+
+      function imageFile(item) {
+        return String(item.src || "").split("/").pop();
+      }
+
+      function imageSrc(collectionId, item) {
+        const filename = imageFile(item);
+        return (
+          "collections/" +
+          encodeURIComponent(collectionId) +
+          "/" +
+          encodeURIComponent(filename)
+        );
+      }
+
+      function thumbSrc(collectionId, item) {
+        const stem = imageFile(item).replace(/\.[^.]+$/, "");
+        return (
+          "thumbs/" +
+          encodeURIComponent(collectionId) +
+          "/" +
+          encodeURIComponent(stem) +
+          ".jpg"
+        );
+      }
+
+      function usableImage(item) {
+        if (!item || !item.src) return false;
+        const stem = (String(item.src).split("/").pop() || "")
+          .replace(/\.[^.]+$/, "")
+          .toLowerCase();
+        return stem !== "background" && stem !== "bsckground" && !stem.startsWith("bg-");
+      }
+
+      function arm(i) {
+        [i - 1, i, i + 1, i + 2].forEach((n) => {
+          if (n < 0 || n >= slides.length) return;
+          const img = slides[n].querySelector("img");
+          if (!img.getAttribute("src")) img.src = img.dataset.src;
+        });
+      }
+
+      function setStatus() {
+        if (!photos.length) {
+          statusEl.textContent = "";
+          return;
+        }
+        const photo = photos[index];
+        statusEl.textContent =
+          index + 1 + " / " + photos.length + ", " + photo.collection;
+      }
+
+      function syncStageZones() {
+        zonePrev.disabled = index <= 0;
+        zoneNext.disabled = index >= photos.length - 1;
+      }
+
+      function show(nextIndex) {
+        if (!slides.length) return;
+        index = nextIndex;
+        syncStageZones();
+        const token = ++showToken;
+        arm(index);
+        const apply = () => {
+          if (token !== showToken) return;
+          slides.forEach((slide, n) => {
+            slide.classList.toggle("is-active", n === index);
+          });
+          setStatus();
+        };
+        const img = slides[index].querySelector("img");
+        if (img.complete && img.naturalWidth) apply();
+        else img.addEventListener("load", apply, { once: true });
+      }
+
+      function whenReady(i, done) {
+        const img = slides[i] && slides[i].querySelector("img");
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          done();
+        };
+        if (!img) {
+          finish();
+          return;
+        }
+        arm(i);
+        if (img.complete && img.naturalWidth) {
+          finish();
+          return;
+        }
+        img.addEventListener("load", finish, { once: true });
+        img.addEventListener("error", finish, { once: true });
+        window.setTimeout(finish, 900);
+      }
+
+      function layoutGrid() {
+        if (!gridItems.length) return;
+        const width = grid.clientWidth;
+        if (width < 20) return;
+        const gutter = 10;
+        const minColumn = 410;
+        const columns = Math.max(1, Math.floor(width / minColumn));
+        const base = Math.floor((width - gutter * (columns - 1)) / columns);
+        const heights = Array(columns).fill(0);
+        gridItems.forEach(({ el, img, photo }) => {
+          const column = heights.indexOf(Math.min.apply(null, heights));
+          const left = (base + gutter) * column;
+          const itemWidth = column === columns - 1 ? width - left : base;
+          const ratio =
+            photo.w && photo.h
+              ? photo.h / photo.w
+              : img.naturalWidth && img.naturalHeight
+                ? img.naturalHeight / img.naturalWidth
+                : 1.25;
+          const itemHeight = Math.max(1, Math.floor(ratio * itemWidth));
+          el.style.left = left + "px";
+          el.style.top = heights[column] + "px";
+          el.style.width = itemWidth + "px";
+          el.style.height = itemHeight + "px";
+          heights[column] += itemHeight + gutter;
+        });
+        const tallest = Math.max.apply(null, heights);
+        grid.style.height = Math.max(0, tallest - gutter) + "px";
+      }
+
+      function step(direction, force) {
+        if (view !== "viewer" || !photos.length) return false;
+        if (busy && !force) return false;
+        const next = index + direction;
+        if (next < 0 || next >= photos.length) return false;
+        busy = true;
+        show(next);
+        history.replaceState({ view: "viewer", index: next }, "", "#photo/" + next);
+        window.setTimeout(() => {
+          busy = false;
+        }, 120);
+        return true;
+      }
+
+      let photoScroll = 0;
+      let returnToPhotoScroll = false;
+
+      function syncView() {
+        const inside = view !== "intro";
+        const contactOpen = view === "contact";
+        if (contactOpen && !grid.hidden) {
+          photoScroll = gridScroll.scrollTop;
+          returnToPhotoScroll = true;
+        }
+        grid.hidden = contactOpen;
+        if (contactOpen) gridScroll.scrollTop = 0;
+        stage.hidden = view !== "viewer";
+        stage.setAttribute("aria-hidden", view === "viewer" ? "false" : "true");
+        contact.hidden = !contactOpen;
+        photosLink.classList.toggle("is-current", view === "photos" || view === "viewer");
+        contactLink.classList.toggle("is-current", contactOpen);
+        if (inside) intro.classList.add("is-leaving");
+        else intro.classList.remove("is-leaving");
+      }
+
+      function showPhotoGrid() {
+        layoutGrid();
+        if (!returnToPhotoScroll) return;
+        returnToPhotoScroll = false;
+        gridScroll.scrollTop = photoScroll;
+        pumpThumbs();
+      }
+
+      function showGrid(push) {
+        view = "photos";
+        syncView();
+        showPhotoGrid();
+        if (push) history.pushState({ view: "photos" }, "", "#photographs");
+      }
+
+      function openViewer(photoIndex, push) {
+        if (!slides.length) return;
+        view = "viewer";
+        syncView();
+        show(photoIndex);
+        if (push) history.pushState({ view: "viewer", index: photoIndex }, "", "#photo/" + photoIndex);
+      }
+
+      function openView(nextView, push) {
+        if (view === nextView || opening) return;
+        const hash = nextView === "photos" ? "#photographs" : "#contact";
+        const apply = () => {
+          opening = false;
+          if (view === nextView) return;
+          view = nextView;
+          syncView();
+          if (nextView === "photos") showPhotoGrid();
+          if (push) history.pushState({ view: nextView }, "", hash);
+        };
+        if (nextView !== "photos") {
+          apply();
+          return;
+        }
+        opening = true;
+        photosReady.finally(apply);
+      }
+
+      function closeGallery(push) {
+        if (view === "intro") return;
+        view = "intro";
+        syncView();
+        if (push) history.pushState({ view: "intro" }, "", location.pathname + location.search);
+      }
+
+      let thumbLoads = 0;
+
+      function thumbDistance(item) {
+        const height = gridScroll.clientHeight || window.innerHeight;
+        const top = gridScroll.scrollTop;
+        const bottom = top + height;
+        const buffer = height * 2.5;
+        const y = item.el.offsetTop + grid.offsetTop;
+        const y2 = y + item.el.offsetHeight;
+        if (y2 < top - buffer) return top - buffer - y2;
+        if (y > bottom + buffer) return y - (bottom + buffer);
+        return 0;
+      }
+
+      function finishThumb(item, token) {
+        if (item.token !== token || item.settled) return;
+        item.settled = true;
+        thumbLoads = Math.max(0, thumbLoads - 1);
+        if (!item.photo.w || !item.photo.h) layoutGrid();
+        pumpThumbs();
+      }
+
+      function ensureThumbListeners(item) {
+        if (item.listening) return;
+        item.listening = true;
+        const img = item.img;
+        img.addEventListener("load", () => finishThumb(item, item.loadToken));
+        img.addEventListener("error", () => {
+          const token = item.loadToken;
+          if (item.token !== token) return;
+          if (!item.fellBack) {
+            item.fellBack = true;
+            img.src = item.photo.src;
+            return;
+          }
+          finishThumb(item, token);
+        });
+      }
+
+      function startThumb(item) {
+        if (item.started) return;
+        const token = (item.token || 0) + 1;
+        item.token = token;
+        item.loadToken = token;
+        item.started = true;
+        item.settled = false;
+        thumbLoads += 1;
+        ensureThumbListeners(item);
+        item.img.src = item.photo.thumb;
+      }
+
+      function releaseFarThumbs() {
+        const height = gridScroll.clientHeight || window.innerHeight;
+        const limit = height * 4;
+        for (const item of gridItems) {
+          if (!item.started || item.settled) continue;
+          if (thumbDistance(item) < limit) continue;
+          item.token = (item.token || 0) + 1;
+          item.started = false;
+          item.fellBack = false;
+          thumbLoads = Math.max(0, thumbLoads - 1);
+          item.img.removeAttribute("src");
+        }
+      }
+
+      function pumpThumbs() {
+        releaseFarThumbs();
+        const waiting = gridItems
+          .filter((item) => !item.started)
+          .map((item) => ({ item, dist: thumbDistance(item) }))
+          .sort((a, b) => a.dist - b.dist);
+        const near = waiting.filter((entry) => entry.dist === 0);
+        const queue = near.length ? near : waiting;
+        const cap = near.length ? 8 : 3;
+        for (const entry of queue) {
+          if (thumbLoads >= cap) break;
+          startThumb(entry.item);
+        }
+      }
+
+      function buildGrid() {
+        grid.replaceChildren();
+        gridItems = photos.map((photo, photoIndex) => {
+          const figure = document.createElement("figure");
+          figure.className = "grid-item";
+          const img = document.createElement("img");
+          img.alt = photo.alt ? photo.collection + " " + photo.alt : photo.collection;
+          img.decoding = "async";
+          figure.addEventListener("click", () => openViewer(photoIndex, true));
+          figure.appendChild(img);
+          grid.appendChild(figure);
+          return { el: figure, img, photo, started: false, settled: false, fellBack: false, token: 0 };
+        });
+        layoutGrid();
+        pumpThumbs();
+      }
+
+      function buildSlides() {
+        slides.forEach((slide) => slide.remove());
+        slides = photos.map((photo) => {
+          const figure = document.createElement("figure");
+          figure.className = "slide";
+          const img = document.createElement("img");
+          img.dataset.src = photo.src;
+          img.alt = photo.alt ? photo.collection + " " + photo.alt : photo.collection;
+          img.decoding = "async";
+          figure.appendChild(img);
+          stage.appendChild(figure);
+          return figure;
+        });
+      }
+
+      async function loadPhotos() {
+        try {
+          const [listRes, manifestRes] = await Promise.all([
+            fetch("collections.json", { cache: "no-store" }),
+            fetch("thumbs/manifest.json", { cache: "no-store" }),
+          ]);
+          if (!listRes.ok) throw new Error("collections");
+          const collections = await listRes.json();
+          const manifest = manifestRes.ok ? await manifestRes.json() : {};
+          const visible = Array.isArray(collections)
+            ? collections.filter((c) => c && c.id && !isHiddenCollection(c.id))
+            : [];
+          const groups = await Promise.all(
+            visible.map(async (collection) => {
+              const res = await fetch(
+                "collections/" + encodeURIComponent(collection.id) + "/images.json",
+                { cache: "no-store" }
+              );
+              if (!res.ok) return [];
+              const data = await res.json();
+              const images = Array.isArray(data) ? data : data.images || [];
+              return images.filter(usableImage).map((item) => {
+                const filename = imageFile(item);
+                const dim = manifest[collection.id + "/" + filename];
+                return {
+                  src: imageSrc(collection.id, item),
+                  thumb: thumbSrc(collection.id, item),
+                  alt: item.alt || "",
+                  collection: collection.name || collection.id,
+                  w: dim && dim[0],
+                  h: dim && dim[1],
+                };
+              });
+            })
+          );
+          photos = groups.flat();
+          if (!photos.length) throw new Error("empty");
+          buildGrid();
+          buildSlides();
+          if (view === "viewer") show(Math.min(index, photos.length - 1));
+        } catch (error) {
+          emptyEl.hidden = false;
+        }
+      }
+
+      enterLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        openView("photos", true);
+      });
+
+      photosLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        if (view === "viewer") {
+          showGrid(true);
+          return;
+        }
+        openView("photos", true);
+      });
+
+      contactLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        openView("contact", true);
+      });
+
+      homeLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        closeGallery(true);
+      });
+
+      window.addEventListener("popstate", () => {
+        const match = location.hash.match(/^#photo\/(\d+)$/);
+        if (match) openViewer(Number(match[1]), false);
+        else if (location.hash === "#photographs") showGrid(false);
+        else if (location.hash === "#contact") openView("contact", false);
+        else closeGallery(false);
+      });
+
+      let wheelLocked = false;
+      let wheelSign = 0;
+      let wheelRecent = 0;
+      let wheelArmedAt = 0;
+      let wheelAccum = 0;
+      let wheelIdle = 0;
+      window.addEventListener(
+        "wheel",
+        (event) => {
+          if (view !== "viewer") return;
+          event.preventDefault();
+          const horizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY);
+          const delta = horizontal ? event.deltaX : event.deltaY;
+          const magnitude = Math.abs(delta);
+          if (magnitude < 0.5) return;
+          const sign = Math.sign(delta);
+          const now = performance.now();
+          window.clearTimeout(wheelIdle);
+          wheelIdle = window.setTimeout(() => {
+            wheelLocked = false;
+            wheelSign = 0;
+            wheelRecent = 0;
+            wheelAccum = 0;
+          }, 80);
+          const reversed = wheelSign !== 0 && sign !== wheelSign;
+          const flickedAgain =
+            wheelLocked && now - wheelArmedAt > 140 && magnitude > Math.max(18, wheelRecent * 2);
+          if (reversed || flickedAgain) {
+            wheelLocked = false;
+            wheelAccum = 0;
+          }
+          wheelSign = sign;
+          wheelRecent = wheelRecent * 0.65 + magnitude * 0.35;
+          if (!horizontal) {
+            if (wheelLocked && magnitude < 24) return;
+            if (magnitude >= 4) step(sign);
+            return;
+          }
+          if (wheelLocked) return;
+          wheelAccum += delta;
+          if (Math.abs(wheelAccum) < 8) return;
+          wheelAccum = 0;
+          wheelLocked = true;
+          wheelArmedAt = now;
+          wheelRecent = magnitude;
+          step(sign, true);
+        },
+        { passive: false }
+      );
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          if (view === "viewer") showGrid(true);
+          else if (view !== "intro") closeGallery(true);
+          return;
+        }
+        if (view !== "viewer") return;
+        if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+          event.preventDefault();
+          step(1);
+        } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+          event.preventDefault();
+          step(-1);
+        }
+      });
+
+      let touchStart = null;
+      let ignoreStageClick = false;
+      let ignoreClickTimer = 0;
+
+      function suppressStageClick() {
+        ignoreStageClick = true;
+        window.clearTimeout(ignoreClickTimer);
+        ignoreClickTimer = window.setTimeout(() => {
+          ignoreStageClick = false;
+        }, 400);
+      }
+      stage.addEventListener(
+        "touchstart",
+        (event) => {
+          if (view !== "viewer" || !event.changedTouches.length) return;
+          const touch = event.changedTouches[0];
+          touchStart = { x: touch.clientX, y: touch.clientY, stepped: false };
+        },
+        { passive: true }
+      );
+      stage.addEventListener(
+        "touchmove",
+        (event) => {
+          if (view !== "viewer" || !touchStart || !event.changedTouches.length) return;
+          const touch = event.changedTouches[0];
+          const dx = touchStart.x - touch.clientX;
+          const dy = touchStart.y - touch.clientY;
+          if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+          event.preventDefault();
+          if (touchStart.stepped) return;
+          const vertical = Math.abs(dy) >= Math.abs(dx);
+          const delta = vertical ? dy : dx;
+          if (Math.abs(delta) < 36) return;
+          touchStart.stepped = true;
+          suppressStageClick();
+          step(delta > 0 ? 1 : -1);
+        },
+        { passive: false }
+      );
+      stage.addEventListener(
+        "touchend",
+        (event) => {
+          if (!touchStart || !event.changedTouches.length) {
+            touchStart = null;
+            return;
+          }
+          const touch = event.changedTouches[0];
+          const dx = touchStart.x - touch.clientX;
+          const dy = touchStart.y - touch.clientY;
+          const vertical = Math.abs(dy) >= Math.abs(dx);
+          const delta = vertical ? dy : dx;
+          if (!touchStart.stepped && Math.abs(delta) >= 28) {
+            suppressStageClick();
+            step(delta > 0 ? 1 : -1);
+          } else if (touchStart.stepped) {
+            suppressStageClick();
+          }
+          touchStart = null;
+        },
+        { passive: true }
+      );
+      stage.addEventListener("touchcancel", () => {
+        if (touchStart && touchStart.stepped) suppressStageClick();
+        touchStart = null;
+      });
+      stage.addEventListener("click", (event) => {
+        if (view !== "viewer") return;
+        if (ignoreStageClick) {
+          ignoreStageClick = false;
+          window.clearTimeout(ignoreClickTimer);
+          return;
+        }
+        const zone = event.target.closest(".stage-zone");
+        if (!zone || zone.disabled) return;
+        if (zone === zoneClose) showGrid(true);
+        else if (zone === zonePrev) step(-1);
+        else if (zone === zoneNext) step(1);
+      });
+
+      gridScroll.addEventListener("scroll", pumpThumbs, { passive: true });
+
       sizeBoard();
-      window.addEventListener("resize", sizeBoard);
+      window.addEventListener("resize", () => {
+        sizeBoard();
+        layoutGrid();
+        pumpThumbs();
+      });
+      function contactHref(value) {
+        if (value.includes("@") && !value.startsWith("http")) return "mailto:" + value;
+        return value;
+      }
+
+      function appendContactLine(line, parent) {
+        const target = parent || contact;
+        const pattern = /https?:\/\/[^\s]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+        let last = 0;
+        let match;
+        while ((match = pattern.exec(line))) {
+          const raw = match[0];
+          const visible = raw.replace(/[),.:;]+$/, "");
+          const offset = match.index;
+          if (offset > last) target.appendChild(document.createTextNode(line.slice(last, offset)));
+          const anchor = document.createElement("a");
+          anchor.textContent = visible;
+          anchor.href = contactHref(visible);
+          if (!anchor.href.startsWith("mailto:")) {
+            anchor.target = "_blank";
+            anchor.rel = "noreferrer";
+          }
+          target.appendChild(anchor);
+          if (visible.length < raw.length) {
+            target.appendChild(document.createTextNode(raw.slice(visible.length)));
+          }
+          last = offset + raw.length;
+        }
+        if (last < line.length) target.appendChild(document.createTextNode(line.slice(last)));
+      }
+
+      function rtfFonts(rtf) {
+        const fonts = {};
+        const table = rtf.match(/\{\\fonttbl([\s\S]*?)\}/);
+        if (!table) return fonts;
+        const pattern = /\\f(\d+)(?:\\[a-zA-Z]+\d*)*\s*([^;]+);/g;
+        let match;
+        while ((match = pattern.exec(table[1]))) fonts[match[1]] = match[2].trim();
+        return fonts;
+      }
+
+      function rtfColors(rtf) {
+        const colors = [""];
+        const table = rtf.match(/\{\\colortbl([\s\S]*?)\}/);
+        if (!table) return colors;
+        table[1].split(";").forEach((entry) => {
+          const red = entry.match(/\\red(\d+)/);
+          const green = entry.match(/\\green(\d+)/);
+          const blue = entry.match(/\\blue(\d+)/);
+          if (!red || !green || !blue) return;
+          colors.push("rgb(" + red[1] + ", " + green[1] + ", " + blue[1] + ")");
+        });
+        return colors;
+      }
+
+      function styledContactRun(text, style) {
+        const span = document.createElement("span");
+        if (style.bold) span.style.fontWeight = "700";
+        if (style.italic) span.style.fontStyle = "italic";
+        if (style.underline) span.style.textDecoration = "underline";
+        if (style.size) span.style.fontSize = style.size;
+        if (style.family) span.style.fontFamily = style.family;
+        if (style.color) span.style.color = style.color;
+        appendContactLine(text, span);
+        contact.appendChild(span);
+      }
+
+      function renderContactRtf(rtf) {
+        const fonts = rtfFonts(rtf);
+        const colors = rtfColors(rtf);
+        let source = rtf.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        source = source.replace(/\{\\fonttbl[\s\S]*?\}/g, "");
+        source = source.replace(/\{\\colortbl[\s\S]*?\}/g, "");
+        source = source.replace(/\{\\\*\\[^{}]*\}/g, "");
+        source = source.replace(/\\\n/g, "\u0000");
+        source = source.replace(/\n/g, "");
+        const style = { bold: false, italic: false, underline: false, size: "", family: "", color: "" };
+        let buffer = "";
+        const flush = () => {
+          if (!buffer) return;
+          styledContactRun(buffer, style);
+          buffer = "";
+        };
+        const applyFont = (name) => {
+          if (!name) return;
+          if (/-bold$/i.test(name)) {
+            style.bold = true;
+            style.family = name.replace(/-bold$/i, "");
+          } else if (/-italic$/i.test(name) || /-oblique$/i.test(name)) {
+            style.italic = true;
+            style.family = name.replace(/-(italic|oblique)$/i, "");
+          } else {
+            style.family = name;
+          }
+        };
+        let index = 0;
+        while (index < source.length) {
+          if (source[index] === "\u0000") {
+            flush();
+            contact.appendChild(document.createElement("br"));
+            index += 1;
+            continue;
+          }
+          const hexRun = source.slice(index).match(/^(?:\\'[0-9a-fA-F]{2})+/);
+          if (hexRun) {
+            const bytes = hexRun[0].match(/[0-9a-fA-F]{2}/g).map((hex) => parseInt(hex, 16));
+            try {
+              buffer += new TextDecoder("euc-kr").decode(Uint8Array.from(bytes));
+            } catch (error) {
+              buffer += "";
+            }
+            index += hexRun[0].length;
+            continue;
+          }
+          const unicode = source.slice(index).match(/^\\u(-?\d+)\??/);
+          if (unicode) {
+            let code = Number(unicode[1]);
+            if (code < 0) code += 65536;
+            buffer += String.fromCharCode(code);
+            index += unicode[0].length;
+            continue;
+          }
+          const control = source.slice(index).match(/^\\([a-zA-Z]+)(-?\d+)? ?/);
+          if (control) {
+            const name = control[1];
+            const value = control[2];
+            if (name === "b") {
+              flush();
+              style.bold = value !== "0";
+            } else if (name === "i") {
+              flush();
+              style.italic = value !== "0";
+            } else if (name === "ul" || name === "uldb" || name === "ulw") {
+              flush();
+              style.underline = value !== "0";
+            } else if (name === "ulnone") {
+              flush();
+              style.underline = false;
+            } else if (name === "fs" && value) {
+              flush();
+              style.size = Number(value) / 2 + "pt";
+            } else if (name === "f" && value != null) {
+              flush();
+              applyFont(fonts[value]);
+            } else if (name === "cf" && value && colors[Number(value)]) {
+              flush();
+              style.color = colors[Number(value)];
+            } else if (name === "par" || name === "line") {
+              flush();
+              contact.appendChild(document.createElement("br"));
+            }
+            index += control[0].length;
+            continue;
+          }
+          if (source[index] === "\\" && "\\{}".includes(source[index + 1])) {
+            buffer += source[index + 1];
+            index += 2;
+            continue;
+          }
+          if (source[index] === "{" || source[index] === "}") {
+            index += 1;
+            continue;
+          }
+          buffer += source[index];
+          index += 1;
+        }
+        flush();
+      }
+
+      function renderContactText(source) {
+        const lines = source
+          .replace(/^\uFEFF/, "")
+          .split(/\r?\n/)
+          .filter((line) => !/^\s*\/\//.test(line));
+        while (lines.length && lines[0].trim() === "") lines.shift();
+        while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+        lines.forEach((line, lineIndex) => {
+          if (lineIndex) contact.appendChild(document.createElement("br"));
+          appendContactLine(line);
+        });
+      }
+
+      async function loadContact() {
+        try {
+          contact.replaceChildren();
+          const rich = await fetch("contact.rtf", { cache: "no-store" });
+          if (rich.ok) {
+            renderContactRtf(await rich.text());
+            return;
+          }
+          const plain = await fetch("contact.txt", { cache: "no-store" });
+          if (plain.ok) renderContactText(await plain.text());
+        } catch (error) {
+          contact.replaceChildren();
+        }
+      }
+
+      syncView();
+      if (view !== "intro") document.documentElement.classList.remove("enter-now");
+      const photosReady = loadPhotos();
+      loadContact();
     </script>
-    <script src="sections/gallery.js?v=4"></script>
-    <script src="sections/recent.js?v=3"></script>
-    <script src="sections/books.js?v=1"></script>
-    <script src="sections/info.js?v=1"></script>
-    <script src="sections/site.js?v=7"></script>
   </body>
 </html>

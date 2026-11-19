@@ -5,8 +5,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { WEB, COLLECTIONS_DIR, CONTACT_RTF, CONTACT_TXT, SITE_OUT, RECENT_DIR, BOOKS_DIR, INFO_DIR } = require("./paths");
-const { buildCatalog } = require("./catalog");
+const { WEB, COLLECTIONS_DIR, CONTACT_RTF, CONTACT_TXT, SITE_OUT } = require("./paths");
 const { buildGridThumbs } = require("./build-grid-thumbs");
 
 const dest = SITE_OUT;
@@ -22,15 +21,6 @@ async function preparePages() {
   for (const file of [CONTACT_RTF, CONTACT_TXT]) {
     if (fs.existsSync(file)) fs.copyFileSync(file, path.join(dest, path.basename(file)));
   }
-  const sections = [
-    [RECENT_DIR, "recent-pictures"],
-    [BOOKS_DIR, "books-and-printed-work"],
-    [INFO_DIR, "info"],
-  ];
-  for (const [src, name] of sections) {
-    if (fs.existsSync(src)) fs.cpSync(src, path.join(dest, name), { recursive: true, dereference: true });
-  }
-  fs.writeFileSync(path.join(dest, "catalog.json"), JSON.stringify(buildCatalog()));
   console.log("📦 GitHub Pages 준비:", dest);
 }
 
