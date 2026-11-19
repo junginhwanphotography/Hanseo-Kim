@@ -1,0 +1,14 @@
+---
+description: Collection order is creation date, newest first
+alwaysApply: true
+---
+
+# Collection menu order
+
+The homepage photo list is ordered by folder **creation date, newest at the top**. Keep that unless the user explicitly asks for a different order.
+
+- Renaming a collection (for example COMSEC → 통신보안) must not move it. Reuse its stored `createdAt`.
+- `_` prefix collections stay above the rest, then newest-created public collections.
+- Do not sort by modified date, last sync, or last rename.
+- Inside a folder, photos are numeric ascending (`1`, `2`, `10`). Smaller numbers come first.
+- `source/tools/sync-local.js` writes `createdAt` into `source/web/collections.json` and sorts by it. Do not overwrite `createdAt` once set.
